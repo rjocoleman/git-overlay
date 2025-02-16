@@ -30,14 +30,14 @@ brews:
   - name: git-overlay
     homepage: "https://github.com/rjocoleman/git-overlay"
     description: "Git overlay tool for managing upstream repositories"
-    tap:
+    repository:
       owner: rjocoleman
       name: git-overlay
       branch: main
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    folder: Formula
+    directory: Formula
     install: |
       bin.install "git-overlay"
     test: |
