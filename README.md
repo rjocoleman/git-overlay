@@ -12,6 +12,7 @@ Download the latest binary from the [releases page](https://github.com/rjocolema
 
 ```bash
 # Install git-overlay
+brew tap rjocoleman/git-overlay https://github.com/rjocoleman/git-overlay
 brew install rjocoleman/git-overlay/git-overlay
 ```
 
