@@ -5,20 +5,20 @@
 class GitOverlay < Formula
   desc "Git overlay tool for managing upstream repositories"
   homepage "https://github.com/rjocoleman/git-overlay"
-  version "0.2.0"
+  version "0.2.1"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.0/git-overlay_Darwin_x86_64.tar.gz"
-      sha256 "ec8f7b1c64809b26b85a0a22dceec7c81577ed414345dae5debd1f48675717ad"
+      url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.1/git-overlay_ darwin_x86_64.tar.gz"
+      sha256 "517e0ff3cff8aef3f4829c57467d7495b61e6a89055f24e6123573edc699c933"
 
       def install
         bin.install "git-overlay"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.0/git-overlay_Darwin_arm64.tar.gz"
-      sha256 "102a4276440cddadbee565dd027f426bcd3b63300e42c0466e3a1704bf64e985"
+      url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.1/git-overlay_ darwin_arm64.tar.gz"
+      sha256 "671bc86410ba86311422a067071d045fddb988ede6bc9ca499bf8d6d328d0b68"
 
       def install
         bin.install "git-overlay"
@@ -29,8 +29,8 @@ class GitOverlay < Formula
   on_linux do
     if Hardware::CPU.intel?
       if Hardware::CPU.is_64_bit?
-        url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.0/git-overlay_Linux_x86_64.tar.gz"
-        sha256 "7eec21f47b2e7d834132eab9c37f3f892d5395e4f5602bf2d92dfdff2563d9e8"
+        url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.1/git-overlay_ linux_x86_64.tar.gz"
+        sha256 "7f1dd0b6e334e02a2880a1fa9b554d2ba4fc6bf4d35119bad36fd46a8ffb4807"
 
         def install
           bin.install "git-overlay"
@@ -39,8 +39,8 @@ class GitOverlay < Formula
     end
     if Hardware::CPU.arm?
       if Hardware::CPU.is_64_bit?
-        url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.0/git-overlay_Linux_arm64.tar.gz"
-        sha256 "7d921e80179cbebac655b1665ac4feb52520f8219eca4332bc1c31dbe962e1ca"
+        url "https://github.com/rjocoleman/git-overlay/releases/download/v0.2.1/git-overlay_ linux_arm64.tar.gz"
+        sha256 "965b3837891131d1fddd4e9dc611490ef0d78e15e32d2aa8b0cdf1453dc6f591"
 
         def install
           bin.install "git-overlay"
