@@ -45,7 +45,7 @@ var initCmd = &cobra.Command{
 		}
 
 		// Create initial links
-		if err := createLinks(cmd, cfg); err != nil {
+		if err := CreateLinks(cmd, cfg); err != nil {
 			return fmt.Errorf("failed to create links: %w", err)
 		}
 

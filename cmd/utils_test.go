@@ -130,9 +130,9 @@ func TestCreateLinks(t *testing.T) {
 			cmd.Flags().String("link-mode", tt.linkMode, "")
 			cmd.Flags().Bool("force", true, "") // Always use force in tests to handle existing files
 
-			err := createLinks(cmd, tt.cfg)
+			err := CreateLinks(cmd, tt.cfg)
 			if (err != nil) != tt.wantError {
-				t.Errorf("createLinks() error = %v, wantError %v", err, tt.wantError)
+				t.Errorf("CreateLinks() error = %v, wantError %v", err, tt.wantError)
 				return
 			}
 

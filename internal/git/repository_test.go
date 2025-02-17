@@ -4,20 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 func setupTestRepo(t *testing.T) (string, func()) {
 	t.Helper()
 
-	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "git-overlay-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	// Create temporary directory using t.TempDir
+	tmpDir := t.TempDir()
 
 	// Change to temp directory
 	originalDir, err := os.Getwd()
@@ -28,9 +21,14 @@ func setupTestRepo(t *testing.T) (string, func()) {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
+	// Initialize git repo with initial branch
+	if err := runGitCommand(tmpDir, []string{"init", "-b", "main"}); err != nil {
+		t.Fatalf("Failed to initialize git repo: %v", err)
+	}
+
 	cleanup := func() {
 		os.Chdir(originalDir)
-		os.RemoveAll(tmpDir)
+		// t.TempDir cleanup is automatic
 	}
 
 	return tmpDir, cleanup
@@ -45,19 +43,14 @@ func setupUpstreamRepo(t *testing.T, dir string) string {
 		t.Fatalf("Failed to create upstream dir: %v", err)
 	}
 
-	repo, err := git.PlainInit(upstreamDir, false)
-	if err != nil {
+	// Initialize git repo
+	if err := runGitCommand(upstreamDir, []string{"init", "-b", "main"}); err != nil {
 		t.Fatalf("Failed to initialize upstream repository: %v", err)
 	}
 
 	// Configure Git to allow file protocol
-	cfg, err := repo.Config()
-	if err != nil {
-		t.Fatalf("Failed to get config: %v", err)
-	}
-	cfg.Raw.Section("protocol").SetOption("file", "allow")
-	if err := repo.SetConfig(cfg); err != nil {
-		t.Fatalf("Failed to set config: %v", err)
+	if err := runGitCommand(upstreamDir, []string{"config", "protocol.file.allow", "always"}); err != nil {
+		t.Fatalf("Failed to configure Git protocol: %v", err)
 	}
 
 	// Create test file
@@ -67,38 +60,12 @@ func setupUpstreamRepo(t *testing.T, dir string) string {
 	}
 
 	// Add and commit file
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("Failed to get worktree: %v", err)
-	}
-
-	_, err = wt.Add("test.txt")
-	if err != nil {
+	if err := runGitCommand(upstreamDir, []string{"add", "test.txt"}); err != nil {
 		t.Fatalf("Failed to add test file: %v", err)
 	}
 
-	_, err = wt.Commit("Initial commit", &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Test",
-			Email: "test@example.com",
-		},
-	})
-	if err != nil {
+	if err := runGitCommand(upstreamDir, []string{"commit", "-m", "Initial commit"}); err != nil {
 		t.Fatalf("Failed to commit test file: %v", err)
-	}
-
-	// Create and checkout main branch
-	wt, err = repo.Worktree()
-	if err != nil {
-		t.Fatalf("Failed to get worktree: %v", err)
-	}
-
-	err = wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName("main"),
-		Create: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create main branch: %v", err)
 	}
 
 	return upstreamDir
@@ -196,28 +163,11 @@ func TestSyncUpstream(t *testing.T) {
 	}
 
 	// Add and commit new file in upstream
-	upstreamRepo, err := git.PlainOpen(upstreamDir)
-	if err != nil {
-		t.Fatalf("Failed to open upstream repository: %v", err)
-	}
-
-	wt, err := upstreamRepo.Worktree()
-	if err != nil {
-		t.Fatalf("Failed to get worktree: %v", err)
-	}
-
-	_, err = wt.Add("new.txt")
-	if err != nil {
+	if err := runGitCommand(upstreamDir, []string{"add", "new.txt"}); err != nil {
 		t.Fatalf("Failed to add new file: %v", err)
 	}
 
-	_, err = wt.Commit("Add new file", &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Test",
-			Email: "test@example.com",
-		},
-	})
-	if err != nil {
+	if err := runGitCommand(upstreamDir, []string{"commit", "-m", "Add new file"}); err != nil {
 		t.Fatalf("Failed to commit new file: %v", err)
 	}
 

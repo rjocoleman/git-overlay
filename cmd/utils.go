@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -10,6 +11,25 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+// getGitCommandEnv returns a properly configured environment for git commands
+func getGitCommandEnv(name, email string) []string {
+	return append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		fmt.Sprintf("GIT_AUTHOR_NAME=%s", name),
+		fmt.Sprintf("GIT_AUTHOR_EMAIL=%s", email),
+		fmt.Sprintf("GIT_COMMITTER_NAME=%s", name),
+		fmt.Sprintf("GIT_COMMITTER_EMAIL=%s", email),
+	)
+}
+
+// runGitCommand executes a git command with the proper environment
+func runGitCommand(dir string, args []string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = getGitCommandEnv("test", "test@example.com")
+	return cmd.Run()
+}
 
 // loadConfig loads and validates the configuration file
 func loadConfig(cmd *cobra.Command) (*config.Config, error) {
@@ -63,6 +83,20 @@ func createLink(src, dst string, linkMode string, force bool, createdLinks *[]st
 		}
 	}
 
+	// Special handling for .gitignore
+	if strings.HasSuffix(dst, ".gitignore") {
+		fmt.Println("Note: .gitignore is being copied for compatibility")
+		if err := copyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to copy .gitignore: %w", err)
+		}
+		// Track created link and state
+		*createdLinks = append(*createdLinks, dst)
+		relPath := strings.TrimPrefix(dst, "overlay/")
+		relSrc := strings.TrimPrefix(src, ".upstream/")
+		state.AddManagedFile(relPath, "copy", relSrc)
+		return nil
+	}
+
 	switch linkMode {
 	case "symlink":
 		// For symlinks, we need to use relative paths
@@ -96,8 +130,8 @@ func createLink(src, dst string, linkMode string, force bool, createdLinks *[]st
 	return nil
 }
 
-// createLinks creates symlinks according to the configuration
-func createLinks(cmd *cobra.Command, cfg *config.Config) error {
+// CreateLinks creates symlinks according to the configuration
+func CreateLinks(cmd *cobra.Command, cfg *config.Config) error {
 	linkMode, err := cmd.Flags().GetString("link-mode")
 	if err != nil {
 		return err

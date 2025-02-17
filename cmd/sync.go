@@ -31,7 +31,7 @@ var syncCmd = &cobra.Command{
 			return fmt.Errorf("failed to update .gitignore: %w", err)
 		}
 
-		if err := createLinks(cmd, cfg); err != nil {
+		if err := CreateLinks(cmd, cfg); err != nil {
 			return fmt.Errorf("failed to rebuild links: %w", err)
 		}
 

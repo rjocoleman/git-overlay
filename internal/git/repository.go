@@ -3,11 +3,20 @@ package git
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"text/template"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 )
+
+const gitmodTemplate = `[submodule "{{.Name}}"]
+	path = {{.Path}}
+	url = {{.URL}}
+	ignore = all
+`
 
 // Repository manages Git operations for both main and upstream repositories
 type Repository struct {
@@ -42,93 +51,100 @@ func InitMainRepository() (*Repository, error) {
 
 // AddUpstreamSubmodule adds the upstream repository as a submodule
 func (r *Repository) AddUpstreamSubmodule(url string) error {
-	// Get worktree for main repository
+	// Create submodule spec
+	spec := config.Submodule{
+		Name: "upstream",
+		Path: ".upstream",
+		URL:  url,
+	}
+
+	// Get worktree
 	wt, err := r.mainRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	// Configure submodule
-	cfg, err := r.mainRepo.Config()
+	// Create/update .gitmodules file
+	gitmodulesFile := filepath.Join(wt.Filesystem.Root(), ".gitmodules")
+	f, err := os.OpenFile(gitmodulesFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to get config: %w", err)
-	}
-
-	cfg.Submodules = make(map[string]*config.Submodule)
-	cfg.Submodules["upstream"] = &config.Submodule{
-		Name: "upstream",
-		URL:  url,
-		Path: ".upstream",
-	}
-
-	if err := r.mainRepo.SetConfig(cfg); err != nil {
-		return fmt.Errorf("failed to set config: %w", err)
-	}
-
-	// Create .gitmodules file
-	gitmodulesContent := fmt.Sprintf(`[submodule "upstream"]
-	path = .upstream
-	url = %s
-	ignore = all
-`, url)
-	if err := os.WriteFile(".gitmodules", []byte(gitmodulesContent), 0644); err != nil {
 		return fmt.Errorf("failed to create .gitmodules: %w", err)
 	}
 
-	// Stage .gitmodules
-	if _, err := wt.Add(".gitmodules"); err != nil {
-		return fmt.Errorf("failed to stage .gitmodules: %w", err)
+	// Write submodule config using template
+	t := template.Must(template.New("gitmodule").Parse(gitmodTemplate))
+	if err := t.Execute(f, spec); err != nil {
+		return fmt.Errorf("failed to write .gitmodules: %w", err)
 	}
 
-	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "git-overlay-*")
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close .gitmodules: %w", err)
+	}
+
+	// Get submodule
+	sub, err := wt.Submodule("upstream")
 	if err != nil {
-		return fmt.Errorf("failed to create temporary directory: %w", err)
+		return fmt.Errorf("failed to get submodule: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
-	// Clone into temporary directory
-	repo, err := git.PlainClone(tmpDir, false, &git.CloneOptions{
-		URL:        url,
+	// Initialize submodule
+	if err := sub.Init(); err != nil {
+		return fmt.Errorf("failed to init submodule: %w", err)
+	}
+
+	// Get submodule repo
+	r.upstreamRepo, err = sub.Repository()
+	if err != nil {
+		return fmt.Errorf("failed to get submodule repository: %w", err)
+	}
+
+	// Get submodule worktree
+	subwt, err := r.upstreamRepo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get submodule worktree: %w", err)
+	}
+
+	// Pull changes
+	if err := subwt.Pull(&git.PullOptions{
 		RemoteName: "origin",
-		Progress:   nil,
-		Tags:       git.AllTags,
-	})
+		Progress:   os.Stdout,
+	}); err != nil && err != git.NoErrAlreadyUpToDate {
+		return fmt.Errorf("failed to pull submodule: %w", err)
+	}
+
+	head, err := r.upstreamRepo.Head()
 	if err != nil {
-		return fmt.Errorf("failed to clone upstream repository: %w", err)
+		return fmt.Errorf("failed to get submodule head: %w", err)
+	}
+	commitHash := head.Hash().String()
+
+	// Update the parent index with the gitlink for .upstream
+	cmd := exec.Command("git", "update-index", "--add", "--cacheinfo", "160000", commitHash, ".upstream")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to update index: %v, output: %s", err, output)
 	}
 
-	// Remove existing .upstream directory if it exists
-	if err := os.RemoveAll(".upstream"); err != nil {
-		return fmt.Errorf("failed to remove existing .upstream directory: %w", err)
-	}
-
-	// Move repository to .upstream
-	if err := os.Rename(tmpDir, ".upstream"); err != nil {
-		return fmt.Errorf("failed to move repository: %w", err)
-	}
-
-	// Open the repository again
-	repo, err = git.PlainOpen(".upstream")
-	if err != nil {
-		return fmt.Errorf("failed to open upstream repository: %w", err)
-	}
-
-	// Configure Git to allow file protocol
-	cfg, err = repo.Config()
-	if err != nil {
-		return fmt.Errorf("failed to get config: %w", err)
-	}
-	cfg.Raw.Section("protocol").SetOption("file", "allow")
-	if err := repo.SetConfig(cfg); err != nil {
-		return fmt.Errorf("failed to set config: %w", err)
-	}
-
-	r.upstreamRepo = repo
-
-	// Stage the submodule and .gitmodules
-	if _, err := wt.Add(".upstream"); err != nil {
-		return fmt.Errorf("failed to stage submodule: %w", err)
+	// Ensure .gitignore from upstream is copied, breaking any symlink
+	upstreamGitIgnore := ".upstream/.gitignore"
+	if stat, err := os.Lstat(upstreamGitIgnore); err == nil {
+		data, err := os.ReadFile(upstreamGitIgnore)
+		if err != nil {
+			return fmt.Errorf("failed to read upstream .gitignore: %w", err)
+		}
+		if stat.Mode()&os.ModeSymlink != 0 {
+			// Remove the symlink and write a fresh copy as a regular file
+			if err := os.Remove(upstreamGitIgnore); err != nil {
+				return fmt.Errorf("failed to remove symlink for upstream .gitignore: %w", err)
+			}
+			if err := os.WriteFile(upstreamGitIgnore, data, 0644); err != nil {
+				return fmt.Errorf("failed to copy upstream .gitignore: %w", err)
+			}
+		} else {
+			// Always recopy even if it's a regular file
+			if err := os.WriteFile(upstreamGitIgnore, data, 0644); err != nil {
+				return fmt.Errorf("failed to recopy upstream .gitignore: %w", err)
+			}
+		}
 	}
 
 	return nil
@@ -144,11 +160,17 @@ func (r *Repository) SyncUpstream(ref string) error {
 		}
 	}
 
-	// Fetch all refs and tags
-	var err error
+	// Get worktree
+	wt, err := r.upstreamRepo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Fetch all refs
 	err = r.upstreamRepo.Fetch(&git.FetchOptions{
 		RemoteName: "origin",
 		Force:      true,
+		Progress:   os.Stdout,
 		RefSpecs: []config.RefSpec{
 			"+refs/heads/*:refs/remotes/origin/*",
 			"+refs/tags/*:refs/tags/*",
@@ -158,40 +180,41 @@ func (r *Repository) SyncUpstream(ref string) error {
 		return fmt.Errorf("failed to fetch upstream: %w", err)
 	}
 
-	// Get worktree
-	wt, err := r.upstreamRepo.Worktree()
-	if err != nil {
-		return fmt.Errorf("failed to get worktree: %w", err)
+	// Pull changes
+	err = wt.Pull(&git.PullOptions{
+		RemoteName: "origin",
+		Force:      true,
+		Progress:   os.Stdout,
+	})
+	if err != nil && err != git.NoErrAlreadyUpToDate {
+		return fmt.Errorf("failed to pull upstream: %w", err)
 	}
 
-	// Try to resolve the reference
-	var hash plumbing.Hash
-
-	// First try as a tag
-	if tagRef, err := r.upstreamRepo.Reference(plumbing.NewTagReferenceName(ref), true); err == nil {
-		hash = tagRef.Hash()
-	} else if branchRef, err := r.upstreamRepo.Reference(plumbing.NewRemoteReferenceName("origin", ref), true); err == nil {
-		// If not a tag, try as a branch
-		hash = branchRef.Hash()
-	} else if len(ref) == 40 {
-		// If still not found, try as a commit hash
-		hash = plumbing.NewHash(ref)
-		if _, err := r.upstreamRepo.CommitObject(hash); err != nil {
-			return fmt.Errorf("reference not found: %s", ref)
-		}
-	} else {
-		return fmt.Errorf("reference not found: %s", ref)
+	// Get remote reference first
+	remoteRef, err := r.upstreamRepo.Reference(plumbing.NewRemoteReferenceName("origin", ref), true)
+	if err == nil {
+		// Found as remote branch
+		err = wt.Checkout(&git.CheckoutOptions{
+			Hash:  remoteRef.Hash(),
+			Force: true,
+		})
+		return err
 	}
 
-	// Checkout the reference
-	err = wt.Checkout(&git.CheckoutOptions{
+	// Try as tag
+	tagRef, err := r.upstreamRepo.Reference(plumbing.NewTagReferenceName(ref), true)
+	if err == nil {
+		err = wt.Checkout(&git.CheckoutOptions{
+			Hash:  tagRef.Hash(),
+			Force: true,
+		})
+		return err
+	}
+
+	// Try as hash
+	hash := plumbing.NewHash(ref)
+	return wt.Checkout(&git.CheckoutOptions{
 		Hash:  hash,
 		Force: true,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to checkout ref %s: %w", ref, err)
-	}
-
-
-	return nil
 }
